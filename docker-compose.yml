@@ -1,0 +1,35 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: smart_home
+      MYSQL_USER: smart_home
+      MYSQL_PASSWORD: change-database-password
+      MYSQL_ROOT_PASSWORD: change-root-password
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-usmart_home", "-pchange-database-password"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  server:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+      - "8080:8080"
+    volumes:
+      - recordings:/opt/smart-home/data
+      - server-logs:/opt/smart-home/log
+
+volumes:
+  mysql-data:
+  recordings:
+  server-logs:

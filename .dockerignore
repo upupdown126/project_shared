@@ -1,0 +1,8 @@
+.git
+build
+cmake-build-*
+client/release
+client/debug
+data
+log
+*.zip
