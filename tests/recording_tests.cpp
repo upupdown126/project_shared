@@ -1,0 +1,6 @@
+#include "smart_home/recording.hpp"
+#include <cstdio>
+#include <fstream>
+#include <iostream>
+
+int main(){smart_home::InMemoryRecordingRepository repo;smart_home::RecordingSegment a={0,1,0,"a.ts",1000,11000,100,"x",false};smart_home::RecordingSegment b={0,1,0,"b.ts",13000,23000,100,"y",false};smart_home::RecordingSegment other={0,2,0,"c.ts",1000,2000,1,"z",false};if(!repo.insert(b)||!repo.insert(a)||!repo.insert(other))return 1;std::vector<smart_home::RecordingSegment> found=repo.query(1,0,0,30000);if(found.size()!=2||found[0].path!="a.ts")return 1;smart_home::HlsPlaylistBuilder hls("/media");std::string playlist=hls.vod(found);if(playlist.find("#EXT-X-TARGETDURATION:10")==std::string::npos||playlist.find("#EXT-X-DISCONTINUITY")==std::string::npos||playlist.find("/media/2.ts")==std::string::npos||playlist.find("#EXT-X-ENDLIST")==std::string::npos)return 1;smart_home::MountedStorage storage("recording_test_storage");std::string path=storage.prepare_segment_path(1,0,1700000000000LL,3);if(path.find("camera_1/channel_0")==std::string::npos||path.find("_3.ts")==std::string::npos)return 1;{std::ofstream output(path.c_str());output<<"test";}if(!storage.remove_file(path))return 1;std::cout<<"recording index storage and HLS tests passed"<<std::endl;return 0;}

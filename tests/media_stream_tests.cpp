@@ -1,0 +1,9 @@
+#include "smart_home/media_stream.hpp"
+#include <chrono>
+#include <iostream>
+#include <mutex>
+#include <thread>
+
+class FakeSource:public smart_home::MediaSource{public:int next=0;bool stopped=false;smart_home::VideoMetadata open(std::uint32_t id,const std::string&){return smart_home::VideoMetadata{id,27,640,480,1,1000,std::vector<std::uint8_t>{1}};}bool read(smart_home::VideoPacket& p){if(stopped||next==3)return false;++next;p=smart_home::VideoPacket{1,static_cast<std::uint32_t>(next),next,next,0,std::vector<std::uint8_t>(2500,static_cast<std::uint8_t>(next))};return true;}void request_stop(){stopped=true;}void close(){}};
+class FakeSink:public smart_home::MediaSink{public:std::mutex mutex;int metadata_count=0;std::vector<smart_home::PacketFragment> fragments;std::string last_error;bool metadata(const smart_home::VideoMetadata&){++metadata_count;return true;}bool fragment(const smart_home::PacketFragment& f){std::lock_guard<std::mutex> lock(mutex);fragments.push_back(f);return true;}void error(const std::string& e){last_error=e;}};
+int main(){std::unique_ptr<smart_home::MediaSource> source(new FakeSource());std::shared_ptr<FakeSink> sink(new FakeSink());smart_home::MediaStreamSession session(std::move(source),sink,8,1000);session.start(1,"rtsp://test");for(int i=0;i<100&&session.running();++i)std::this_thread::sleep_for(std::chrono::milliseconds(10));session.stop();if(sink->metadata_count!=1||!sink->last_error.empty())return 1;std::lock_guard<std::mutex> lock(sink->mutex);if(sink->fragments.size()!=9)return 1;smart_home::PacketReassembler r;std::vector<std::uint8_t> done;int packets=0;for(std::size_t i=0;i<sink->fragments.size();++i)if(r.append(sink->fragments[i],done)){smart_home::VideoPacket p=smart_home::deserialize_video_packet(done);if(p.packet_id!=static_cast<std::uint32_t>(++packets))return 1;}if(packets!=3)return 1;std::cout<<"media stream session test passed"<<std::endl;return 0;}
