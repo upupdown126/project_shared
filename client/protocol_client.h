@@ -70,6 +70,7 @@ private:
     struct Assembly { quint16 count; quint16 next; QByteArray data; };
     enum AuthOperation { NoAuth, Registering, LoggingIn };
     void sendPacket(quint32 type, const QByteArray& value = QByteArray());
+    void sendAuthenticatedPacket(quint32 type, const QByteArray& value = QByteArray());
     void dispatch(quint32 type, const QByteArray& value);
     void consumeFragment(const QByteArray& value);
     QVector<CameraDeviceDto> decodeCameras(const QByteArray& value) const;
@@ -80,6 +81,7 @@ private:
     QByteArray receiveBuffer_;
     QHash<quint32, Assembly> assemblies_;
     AuthOperation authOperation_;
+    bool authenticated_;
     QString pendingPassword_;
 };
 

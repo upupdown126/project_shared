@@ -3,8 +3,8 @@
 #include <iostream>
 
 int main() {
-    smart_home::CameraDevice camera = {7, 1, "serial-007", 2, "192.0.2.7",
-        "rtsp://192.0.2.7/live", "rtmp://192.0.2.7/live"};
+    smart_home::CameraDevice camera = {7, 1, "serial-007", 2, "192.168.1.7",
+        "rtsp://192.168.1.7/live", "rtmp://192.168.1.7/live"};
     smart_home::InMemoryCameraRepository repository;
     if (!repository.save(camera)) return 1;
     const std::vector<smart_home::CameraDevice> source = repository.list();

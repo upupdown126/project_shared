@@ -14,7 +14,7 @@ int main() {
     if (smart_home::md5_hex("") != "d41d8cd98f00b204e9800998ecf8427e" ||
         smart_home::md5_hex("abc") != "900150983cd24fb0d6963f7d28e17f72") return 1;
     FakeHttp http;
-    smart_home::CameraApi api(http, "http://192.0.2.100/", "secret-value");
+    smart_home::CameraApi api(http, "http://192.168.1.100/", "secret-value");
     if (api.recording_list(1000, 2000, 0, 123).status != 200 ||
         http.url.find("/xsw/api/record/list?") == std::string::npos ||
         http.url.find("token=") == std::string::npos) return 1;

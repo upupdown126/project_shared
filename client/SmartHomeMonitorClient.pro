@@ -11,8 +11,11 @@ HEADERS += client_theme.h \
            main_window.h \
            protocol_client.h \
            video_decoder.h
+RESOURCES += resources.qrc
 
 win32 {
+    RC_ICONS = app_icon.ico
+
     # A command-line assignment still takes priority.  Otherwise use an
     # environment variable, the SDK bundled with a version package, or the
     # workspace SDK link.  This keeps Qt Creator's extra arguments optional.

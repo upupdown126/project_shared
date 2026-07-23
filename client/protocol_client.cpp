@@ -36,53 +36,76 @@ QString readText(const QByteArray& in, int& at) {
 }
 
 ProtocolClient::ProtocolClient(QObject* parent)
-    : QObject(parent), authOperation_(NoAuth) {
+    : QObject(parent), authOperation_(NoAuth), authenticated_(false) {
     // The monitor server is reached directly over the LAN.  Do not inherit a
     // browser/system proxy, because QTcpSocket cannot use every proxy type
     // exposed by Windows (for example an automatic HTTP proxy configuration).
     socket_.setProxy(QNetworkProxy::NoProxy);
     qRegisterMetaType<QVector<CameraDeviceDto> >("QVector<CameraDeviceDto>");
-    connect(&socket_, &QTcpSocket::connected, this, &ProtocolClient::connected);
-    connect(&socket_, &QTcpSocket::disconnected, this, &ProtocolClient::disconnected);
+    connect(&socket_, &QTcpSocket::connected, this, [this] {
+        authenticated_ = false;
+        emit connected();
+    });
+    connect(&socket_, &QTcpSocket::disconnected, this, [this] {
+        authenticated_ = false;
+        authOperation_ = NoAuth;
+        pendingPassword_.clear();
+        emit disconnected();
+    });
     connect(&socket_, &QTcpSocket::readyRead, this, &ProtocolClient::readAvailable);
     connect(&socket_, QOverload<QAbstractSocket::SocketError>::of(&QTcpSocket::error),
             this, &ProtocolClient::socketError);
 }
 void ProtocolClient::connectToServer(const QString& host, quint16 port) {
+    if (socket_.state() == QAbstractSocket::ConnectedState) {
+        emit message(tr("服务器已经连接，请直接注册或登录")); return;
+    }
+    if (socket_.state() != QAbstractSocket::UnconnectedState) {
+        emit message(tr("正在连接服务器，请稍候")); return;
+    }
     receiveBuffer_.clear(); assemblies_.clear(); socket_.connectToHost(host, port);
 }
 void ProtocolClient::disconnectFromServer() { socket_.disconnectFromHost(); }
 void ProtocolClient::registerUser(const QString& user, const QString& password) {
+    if (socket_.state() != QAbstractSocket::ConnectedState) {
+        emit protocolError(tr("请先连接服务器，再注册账号")); return;
+    }
+    if (authOperation_ != NoAuth) { emit protocolError(tr("认证操作正在进行，请稍候")); return; }
     authOperation_ = Registering; pendingPassword_ = password;
     sendPacket(RegisterSection1, user.toUtf8());
 }
 void ProtocolClient::login(const QString& user, const QString& password) {
+    if (socket_.state() != QAbstractSocket::ConnectedState) {
+        emit protocolError(tr("请先连接服务器，再登录账号")); return;
+    }
+    if (authenticated_) { emit message(tr("当前连接已经登录")); return; }
+    if (authOperation_ != NoAuth) { emit protocolError(tr("认证操作正在进行，请稍候")); return; }
     authOperation_ = LoggingIn; pendingPassword_ = password;
     sendPacket(LoginSection1, user.toUtf8());
 }
-void ProtocolClient::requestCameras() { sendPacket(GetCameras); }
+void ProtocolClient::requestCameras() { sendAuthenticatedPacket(GetCameras); }
 void ProtocolClient::saveCamera(const CameraDeviceDto& camera) {
-    sendPacket(SaveCamera, encodeCamera(camera));
+    sendAuthenticatedPacket(SaveCamera, encodeCamera(camera));
 }
 void ProtocolClient::startStream(quint32 id, const QString& url) {
-    sendPacket(GetStream, QByteArray::number(id) + " " + url.toUtf8());
+    sendAuthenticatedPacket(GetStream, QByteArray::number(id) + " " + url.toUtf8());
 }
-void ProtocolClient::stopStream() { sendPacket(StopStream); assemblies_.clear(); }
+void ProtocolClient::stopStream() { sendAuthenticatedPacket(StopStream); assemblies_.clear(); }
 void ProtocolClient::ptz(quint32 channel, const QString& command, int speed) {
     const QByteArray value = QByteArray::number(channel) + " " + command.toUtf8() + " " +
         QByteArray::number(speed) + " " + QByteArray::number(QDateTime::currentSecsSinceEpoch());
-    sendPacket(PtzControl, value);
+    sendAuthenticatedPacket(PtzControl, value);
 }
 void ProtocolClient::startRecording(quint32 id, quint32 channel, const QString& url) {
-    sendPacket(StartRecording, QByteArray::number(id) + " " + QByteArray::number(channel) +
-               " " + url.toUtf8());
+    sendAuthenticatedPacket(StartRecording, QByteArray::number(id) + " " + QByteArray::number(channel) +
+                            " " + url.toUtf8());
 }
 void ProtocolClient::stopRecording(quint32 id, quint32 channel) {
-    sendPacket(StopRecording, QByteArray::number(id) + " " + QByteArray::number(channel));
+    sendAuthenticatedPacket(StopRecording, QByteArray::number(id) + " " + QByteArray::number(channel));
 }
 void ProtocolClient::requestPlayback(quint32 id, quint32 channel, qint64 begin, qint64 end) {
-    sendPacket(GetPlaybackUrl, QByteArray::number(id) + " " + QByteArray::number(channel) +
-               " " + QByteArray::number(begin) + " " + QByteArray::number(end));
+    sendAuthenticatedPacket(GetPlaybackUrl, QByteArray::number(id) + " " + QByteArray::number(channel) +
+                            " " + QByteArray::number(begin) + " " + QByteArray::number(end));
 }
 void ProtocolClient::sendPacket(quint32 type, const QByteArray& value) {
     if (socket_.state() != QAbstractSocket::ConnectedState) {
@@ -90,6 +113,12 @@ void ProtocolClient::sendPacket(quint32 type, const QByteArray& value) {
     }
     QByteArray wire; wire.reserve(8 + value.size()); append32(wire, type);
     append32(wire, quint32(value.size())); wire.append(value); socket_.write(wire);
+}
+void ProtocolClient::sendAuthenticatedPacket(quint32 type, const QByteArray& value) {
+    if (!authenticated_) {
+        emit protocolError(tr("请先登录；服务器连接成功不等于身份认证成功")); return;
+    }
+    sendPacket(type, value);
 }
 void ProtocolClient::readAvailable() {
     receiveBuffer_.append(socket_.readAll());
@@ -112,8 +141,8 @@ void ProtocolClient::dispatch(quint32 type, const QByteArray& value) {
             sendPacket(next, passwordDigest(value, pendingPassword_)); return;
         }
         if (type == RegisterSection2Ok) { authOperation_ = NoAuth; pendingPassword_.clear();
-            emit registrationFinished(); emit message(tr("注册成功")); return; }
-        if (type == LoginSection2Ok) { authOperation_ = NoAuth; pendingPassword_.clear();
+            emit message(tr("注册成功")); emit registrationFinished(); return; }
+        if (type == LoginSection2Ok) { authOperation_ = NoAuth; authenticated_ = true; pendingPassword_.clear();
             emit authenticated(); emit message(tr("登录成功")); requestCameras(); return; }
         if (type == Cameras) { emit camerasReceived(decodeCameras(value)); return; }
         if (type == StreamMetadata) { emit videoMetadata(value); return; }
@@ -121,6 +150,7 @@ void ProtocolClient::dispatch(quint32 type, const QByteArray& value) {
         if (type == PlaybackUrl) { emit playbackUrlReceived(QUrl(QString::fromUtf8(value))); return; }
         if (type == Error || type == LoginSection1Error || type == LoginSection2Error ||
             type == RegisterSection1Error || type == RegisterSection2Error) {
+            if (type != Error) { authOperation_ = NoAuth; pendingPassword_.clear(); }
             emit protocolError(QString::fromUtf8(value)); return;
         }
         emit message(QString::fromUtf8(value));
